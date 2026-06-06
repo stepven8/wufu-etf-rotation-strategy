@@ -167,7 +167,7 @@ def set_strategy_params(context):
     # 状态记录
     g.position_highs = {}
     g.rankings_cache = {'date': None, 'data': None}
-    g.enable_dynamic_money_etf_pool = True
+    g.enable_dynamic_etf_pool = True
     g.dynamic_yesterday_money_etf_count = 5
     g.dynamic_avg_money_candidate_count = 50
     g.dynamic_avg_money_days = 5
@@ -344,7 +344,7 @@ def get_top_money_return_etfs_172(context, days, money_candidate_count, return_c
 
 
 def get_dynamic_money_etfs_172(context):
-    if not g.enable_dynamic_money_etf_pool:
+    if not g.enable_dynamic_etf_pool:
         return {'yesterday': [], 'money_return_5d': []}
 
     today = context.current_dt.date()
@@ -373,6 +373,9 @@ def get_dynamic_money_etfs_172(context):
 
 
 def get_candidate_etf_pool_172(context):
+    if not g.enable_dynamic_etf_pool:
+        return list(g.etf_pool_3)
+
     dynamic_etfs = get_dynamic_money_etfs_172(context)
     combined = (
         list(g.etf_pool_3)
@@ -860,8 +863,8 @@ def after_code_changed(context):
         g.enable_premium_filter = True
         g.premium_threshold = 0.20
 
-    if not hasattr(g, 'enable_dynamic_money_etf_pool'):
-        g.enable_dynamic_money_etf_pool = True
+    if not hasattr(g, 'enable_dynamic_etf_pool'):
+        g.enable_dynamic_etf_pool = getattr(g, 'enable_dynamic_money_etf_pool', True)
     if not hasattr(g, 'dynamic_yesterday_money_etf_count'):
         g.dynamic_yesterday_money_etf_count = 5
     if not hasattr(g, 'dynamic_avg_money_candidate_count'):

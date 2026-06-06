@@ -37,6 +37,8 @@
 
 三部分会合并去重后一起进入原有动量排名。固定池标的不会被修改、覆盖或删除；每天变化的是昨日成交金额前 5，以及“5 日高成交候选中的 5 日涨幅前 5”。如果动态 ETF 已经存在于固定池中，只保留固定池中的那一份，不重复计算，也不会额外向后补足“新增 ETF 数量”。
 
+如果 `g.enable_dynamic_etf_pool = False`，策略不会获取这两组动态 ETF，最终只使用固定池 `g.etf_pool_3` 进行动量排名。
+
 固定 ETF 池覆盖范围很广，主要分为以下几类：
 
 ### 商品与另类资产
@@ -124,7 +126,7 @@
 | `g.enable_premium_filter` | `True` | 开启 ETF 溢价率过滤。 |
 | `g.premium_threshold` | `0.20` | 溢价率超过 20% 时过滤。 |
 | `g.rankings_cache` | `{'date': None, 'data': None}` | 当日排名缓存，保证同一天卖出和买入使用同一批排名结果。 |
-| `g.enable_dynamic_money_etf_pool` | `True` | 开启动态成交金额 ETF 候选池。 |
+| `g.enable_dynamic_etf_pool` | `True` | 动态 ETF 总开关。为 `True` 时追加两组动态 ETF；为 `False` 时只使用固定池。 |
 | `g.dynamic_yesterday_money_etf_count` | `5` | 取昨日成交金额最大的 5 只全市场 ETF。 |
 | `g.dynamic_avg_money_candidate_count` | `50` | 先按过去 5 日平均成交金额选出前 50 只高流动性 ETF。 |
 | `g.dynamic_avg_money_days` | `5` | 平均成交金额的计算窗口。 |
@@ -165,6 +167,11 @@
 ## 动态 ETF 池
 
 新增的动态池只改变“哪些 ETF 有资格进入动量排名”，不改变动量评分公式、过滤顺序、买卖时间、盈利保护、防御资产或最终持仓数量。
+
+动态池由 `g.enable_dynamic_etf_pool` 统一控制：
+
+- `True`：固定 ETF 池 + 昨日成交金额前 5 + 过去 5 日均额前 50 中的涨幅前 5；
+- `False`：只使用固定 ETF 池，不获取全市场 ETF 列表，也不拉取动态池行情。
 
 ### 昨日成交金额前 5
 
