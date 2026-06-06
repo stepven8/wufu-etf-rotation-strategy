@@ -167,6 +167,11 @@ def set_strategy_params(context):
     # 状态记录
     g.position_highs = {}
     g.rankings_cache = {'date': None, 'data': None}
+    g.enable_dynamic_money_etf_pool = True
+    g.dynamic_yesterday_money_etf_count = 5
+    g.dynamic_avg_money_etf_count = 5
+    g.dynamic_avg_money_days = 5
+    g.dynamic_money_etf_cache = {'date': None, 'yesterday': [], 'avg_5d': []}
 
 
 # 回测设置
@@ -205,6 +210,114 @@ def get_cached_rankings(context):
         ranked = get_ranked_etfs_172(context)
         g.rankings_cache = {'date': today, 'data': ranked}
     return g.rankings_cache['data']
+
+
+def parse_money_data_172(df, min_valid_days=1):
+    if df is None or df.empty or 'money' not in df.columns:
+        return pd.Series(dtype=float)
+
+    data = df.copy()
+    if isinstance(data.index, pd.MultiIndex):
+        data = data.reset_index()
+
+    code_col = None
+    for col in ['code', 'security', 'level_1', 'level_0']:
+        if col not in data.columns:
+            continue
+        values = data[col].dropna().astype(str)
+        if values.str.contains(r'\.(?:XSHG|XSHE)$', regex=True).any():
+            code_col = col
+            break
+    if code_col is None:
+        return pd.Series(dtype=float)
+
+    data = data[[code_col, 'money']].copy()
+    data['money'] = pd.to_numeric(data['money'], errors='coerce')
+    data = data.dropna(subset=['money'])
+    data = data[data['money'] > 0]
+    if data.empty:
+        return pd.Series(dtype=float)
+
+    valid_counts = data.groupby(code_col)['money'].count()
+    money_mean = data.groupby(code_col)['money'].mean()
+    money_mean = money_mean[valid_counts >= min_valid_days]
+    return money_mean.sort_values(ascending=False)
+
+
+def get_top_money_etfs_172(context, days, count, label):
+    try:
+        all_etfs = list(get_all_securities(['etf'], date=context.previous_date).index)
+        if not all_etfs:
+            return []
+
+        df_money = get_price(
+            all_etfs,
+            end_date=context.previous_date,
+            count=days,
+            frequency='daily',
+            fields=['money'],
+            skip_paused=False,
+            fq='pre',
+            panel=False,
+        )
+        money_series = parse_money_data_172(df_money, min_valid_days=days)
+        top_etfs = money_series.head(count).index.tolist()
+        if top_etfs:
+            log.info(f"[ETF轮动] {label}: {top_etfs}")
+        return top_etfs
+    except Exception as e:
+        log.warn(f"[ETF轮动] 获取{label}失败: {e}")
+        return []
+
+
+def get_dynamic_money_etfs_172(context):
+    if not g.enable_dynamic_money_etf_pool:
+        return {'yesterday': [], 'avg_5d': []}
+
+    today = context.current_dt.date()
+    if g.dynamic_money_etf_cache.get('date') == today:
+        return g.dynamic_money_etf_cache
+
+    yesterday_top = get_top_money_etfs_172(
+        context,
+        days=1,
+        count=g.dynamic_yesterday_money_etf_count,
+        label='昨日成交金额前5 ETF',
+    )
+    avg_5d_top = get_top_money_etfs_172(
+        context,
+        days=g.dynamic_avg_money_days,
+        count=g.dynamic_avg_money_etf_count,
+        label=f'过去{g.dynamic_avg_money_days}日平均成交金额前5 ETF',
+    )
+    g.dynamic_money_etf_cache = {
+        'date': today,
+        'yesterday': yesterday_top,
+        'avg_5d': avg_5d_top,
+    }
+    return g.dynamic_money_etf_cache
+
+
+def get_candidate_etf_pool_172(context):
+    dynamic_etfs = get_dynamic_money_etfs_172(context)
+    combined = (
+        list(g.etf_pool_3)
+        + dynamic_etfs.get('yesterday', [])
+        + dynamic_etfs.get('avg_5d', [])
+    )
+
+    candidate_pool = []
+    seen = set()
+    for etf in combined:
+        if etf not in seen:
+            candidate_pool.append(etf)
+            seen.add(etf)
+
+    if dynamic_etfs.get('yesterday') or dynamic_etfs.get('avg_5d'):
+        log.info(
+            f"[ETF轮动] 固定池{len(g.etf_pool_3)}只 + 动态池去重后共{len(candidate_pool)}只ETF参与排名"
+        )
+    return candidate_pool
 
 
 def get_premium_rate_172(code, date, max_back_days=5):
@@ -271,7 +384,7 @@ def profit_protection_check_172(context):
 def get_ranked_etfs_172(context):
     etf_metrics = []
     current_data = get_current_data()
-    for etf in g.etf_pool_3:
+    for etf in get_candidate_etf_pool_172(context):
         if current_data[etf].paused:
             continue
         metrics = calculate_momentum_metrics_172(context, etf)
@@ -672,5 +785,12 @@ def after_code_changed(context):
     if not hasattr(g, 'enable_premium_filter'):
         g.enable_premium_filter = True
         g.premium_threshold = 0.20
+
+    if not hasattr(g, 'enable_dynamic_money_etf_pool'):
+        g.enable_dynamic_money_etf_pool = True
+        g.dynamic_yesterday_money_etf_count = 5
+        g.dynamic_avg_money_etf_count = 5
+        g.dynamic_avg_money_days = 5
+        g.dynamic_money_etf_cache = {'date': None, 'yesterday': [], 'avg_5d': []}
 
     schedule_tasks(context)
